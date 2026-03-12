@@ -74,7 +74,7 @@ def get_cpes_paginated(page: int = 1, limit: int = 10) -> list:
     cur = con.cursor()
     offset = (page - 1) * limit
     cur.execute('''
-        SELECT id, title, reference_links, cpe_22_uri, cpe_23_uri, cpe_22_deprecation_date, cpe_23_deprecation_date
+        SELECT *
         FROM cpes
         ORDER BY id
         LIMIT ? OFFSET ?
@@ -88,7 +88,6 @@ def search_cpes(cpe_title: str = None, cpe_22_uri: str = None, cpe_23_uri: str =
     con = sqlite3.connect(DB)
     cur = con.cursor()
     
-    # Build dynamic WHERE clause
     where_clauses = []
     params = []
     
@@ -105,14 +104,12 @@ def search_cpes(cpe_title: str = None, cpe_22_uri: str = None, cpe_23_uri: str =
         params.append(f'%{cpe_23_uri}%')
     
     if deprecation_date:
-        # CPEs deprecated before the given date (either CPE 2.2 or 2.3)
+       
         where_clauses.append('(cpe_22_deprecation_date < ? OR cpe_23_deprecation_date < ?)')
         params.extend([deprecation_date, deprecation_date])
     
-    # Build the query
     query = '''
-        SELECT id, title, reference_links, cpe_22_uri, cpe_23_uri, cpe_22_deprecation_date, cpe_23_deprecation_date
-        FROM cpes
+        SELECT * FROM cpes
     '''
     
     if where_clauses:
