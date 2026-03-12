@@ -1,3 +1,6 @@
 cpes.db
 SVCE _ Securin Labs _ Assessment/
 .vscode/
+programs/__pycache__/database.cpython-312.pyc
+programs/__pycache__/database.cpython-313.pyc
+programs/app.py

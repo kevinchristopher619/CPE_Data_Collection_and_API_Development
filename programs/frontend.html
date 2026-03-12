@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPE Dictionary Viewer</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f0f0f0;padding:20px}
+        .container{max-width:1200px;margin:0 auto;background:#fff;border:1px solid #ccc;overflow:hidden}
+        .header{background:#000;color:#fff;padding:20px;text-align:center}.header h1{margin:0;font-size:2em}.header p{margin:5px 0 0 0}
+        .content{padding:20px}.filters{background:#f9f9f9;padding:15px;border:1px solid #ddd;margin-bottom:20px}
+        .filter-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:10px}
+        .filter-group{display:flex;flex-direction:column}.filter-group label{font-size:.9em;font-weight:bold;margin-bottom:3px;color:#000}
+        .filter-group input,.filter-group select{padding:6px 8px;border:1px solid #999;border-radius:0;font-size:.9em}
+        .filter-group input:focus,.filter-group select:focus{outline:0;border-color:#000;background:#f5f5f5}
+        .buttons{display:flex;gap:8px;flex-wrap:wrap}
+        button{padding:8px 16px;border:1px solid #000;border-radius:0;cursor:pointer;font-weight:bold;background:#fff;color:#000}
+        button:hover{background:#000;color:#fff}
+        .btn-export{margin-left:auto}
+        .stats{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:10px}
+        .info-text{color:#000;font-weight:bold}.pagination{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+        .pagination button{padding:6px 10px}.pagination button.active{background:#000;color:#fff}
+        .pagination button:disabled{opacity:.3;cursor:not-allowed}
+        table{width:100%;border-collapse:collapse;margin-top:10px}thead{background:#e0e0e0;border:1px solid #999}
+        th{padding:10px;text-align:left;font-weight:bold;color:#000}td{padding:10px;border-bottom:1px solid #ddd}
+        tbody tr:hover{background:#f5f5f5}.truncate{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .uri-text{font-family:monospace;font-size:.85em;color:#333}.date-text{color:#555;font-weight:bold}
+        .ref-link{color:#000;text-decoration:underline;cursor:pointer}
+        .empty,.error,.loading{text-align:center;padding:40px;color:#333}.empty h2,.error h2{color:#000;margin-bottom:10px}
+        .error{color:#600}.error h2{color:#600}.spinner{display:inline-block;width:20px;height:20px;border:3px solid #ddd;border-top:3px solid #000;border-radius:50%;animation:spin 1s linear infinite}
+        @keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}.hidden{display:none!important}
+        @media(max-width:768px){.header h1{font-size:1.5em}.filter-row{grid-template-columns:1fr}.buttons{flex-direction:column}.btn-export{margin-left:0}table{font-size:.85em}th,td{padding:6px}.truncate{max-width:100px}}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header"><h1>CPE Dictionary Viewer</h1><p>Search and explore Common Platform Enumeration data</p></div>
+        <div class="content">
+            <div class="filters">
+                <div class="filter-row">
+                    <div class="filter-group"><label>CPE Title</label><input type="text" id="titleFilter" placeholder="e.g., wordpress"></div>
+                    <div class="filter-group"><label>CPE 2.2 URI</label><input type="text" id="cpe22Filter" placeholder="e.g., cpe:/a:"></div>
+                    <div class="filter-group"><label>CPE 2.3 URI</label><input type="text" id="cpe23Filter" placeholder="e.g., cpe:2.3:a:"></div>
+                    <div class="filter-group"><label>Deprecated Before</label><input type="date" id="deprecationFilter"></div>
+                </div>
+                <div class="buttons"><button class="btn-search" id="searchBtn">Search</button><button class="btn-reset" id="resetBtn">Reset</button><button class="btn-export" id="exportBtn">Export CSV</button></div>
+            </div>
+            <div class="stats" id="statsTop"></div>
+            <div class="loading hidden" id="loading"><div class="spinner"></div> Loading...</div>
+            <div class="hidden" id="tableDiv"><table id="cpesTable"><thead><tr><th>Title</th><th>CPE 2.2 URI</th><th>CPE 2.3 URI</th><th>Deprecated (2.2)</th><th>Deprecated (2.3)</th><th>References</th></tr></thead><tbody id="tbody"></tbody></table></div>
+            <div class="empty hidden" id="empty"><h2>No CPEs Found</h2><p id="emptyMsg"></p></div>
+            <div class="error hidden" id="error"><h2>Error Loading Data</h2><p id="errorMsg"></p></div>
+            <div class="stats" id="statsBottom" style="margin-top:20px;"></div>
+        </div>
+    </div>
+    <script>
+const API='http://localhost:5000/api';
+const state={page:1,limit:25,total:0,isSearching:false,
+  filters:{cpe_title:'',cpe_22_uri:'',cpe_23_uri:'',deprecation_date:''}};
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('searchBtn').onclick=search;
+  document.getElementById('resetBtn').onclick=reset;
+  document.getElementById('exportBtn').onclick=exportCSV;
+  load();
+});
+async function load(){
+  show('loading');
+  try{
+    const url=state.isSearching?
+      `${API}/cpes/search?${new URLSearchParams(state.filters)}`:
+      `${API}/cpes?page=${state.page}&limit=${state.limit}`;
+    const res=await fetch(url);
+    if(!res.ok)throw new Error('API Error: '+res.status);
+    render(await res.json());
+  }catch(e){
+    show('error');
+    document.getElementById('errorMsg').textContent=e.message;
+  }
+}
+function search(){
+  state.filters={
+    cpe_title:document.getElementById('titleFilter').value,
+    cpe_22_uri:document.getElementById('cpe22Filter').value,
+    cpe_23_uri:document.getElementById('cpe23Filter').value,
+    deprecation_date:document.getElementById('deprecationFilter').value};
+  if(!Object.values(state.filters).some(v=>v)){
+    alert('Enter at least one search criterion');
+    return;}
+  state.isSearching=true;
+  state.page=1;
+  load();
+}
+function reset(){
+  document.getElementById('titleFilter').value='';
+  document.getElementById('cpe22Filter').value='';
+  document.getElementById('cpe23Filter').value='';
+  document.getElementById('deprecationFilter').value='';
+  state.filters={cpe_title:'',cpe_22_uri:'',cpe_23_uri:'',deprecation_date:''};
+  state.isSearching=false;
+  state.page=1;
+  load();
+}
+function render(data){
+  const tbody=document.getElementById('tbody');
+  tbody.innerHTML='';
+  if(state.isSearching){
+    if(!data.data?.length){show('empty');
+      document.getElementById('emptyMsg').textContent='No matches found.';
+      return;}
+    show('table');
+    data.data.forEach(c=>tbody.appendChild(createRow(c)));
+    const cnt=data.data.length;
+    document.getElementById('statsTop').innerHTML=
+      '<div class="info-text">Found '+cnt+' result'+(cnt===1?'':'s')+'</div>';
+    document.getElementById('statsBottom').innerHTML='';
+  }else{
+    if(!data.data?.length){show('empty');
+      document.getElementById('emptyMsg').textContent='No CPEs available.';
+      return;}
+    show('table');
+    state.total=data.total;
+    data.data.forEach(c=>tbody.appendChild(createRow(c)));
+    renderPag(data.page,data.limit,data.total);
+  }
+}
+function createRow(c){
+  const row=document.createElement('tr');
+  const refs=c.reference_links||[];
+  const r0=refs.slice(0,2).map(r=>'<a class="ref-link" href="'+r+
+    '" target="_blank">'+r.substr(0,40)+'</a>').join(' ');
+  const r1=refs.length>2?'<span class="ref-link" style="cursor:pointer" '+
+    'onclick="alert('+JSON.stringify(refs.slice(2).join('\n'))+')"><b>'+
+    (refs.length-2)+' more</b></span>':'';
+  const refHtml=refs.length===0?'<span style="color:#999">No links</span>':
+    r0+(r1?' '+r1:'');
+  const fmt=d=>d?new Date(d).toLocaleDateString('en-US',
+    {year:'numeric',month:'short',day:'numeric'}):'-';
+  row.innerHTML='<td class="truncate" title="'+c.cpe_title+'">'+
+    c.cpe_title.substr(0,50)+'</td><td class="uri-text truncate" title="'+
+    (c.cpe_22_uri||'')+'">'+(c.cpe_22_uri||'-')+'</td><td class="uri-text '+
+    'truncate" title="'+(c.cpe_23_uri||'')+'">'+(c.cpe_23_uri||'-')+
+    '</td><td class="date-text">'+fmt(c.cpe_22_deprecation_date)+
+    '</td><td class="date-text">'+fmt(c.cpe_23_deprecation_date)+
+    '</td><td>'+refHtml+'</td>';
+  return row;
+}
+function renderPag(page,limit,total){
+  const pages=Math.ceil(total/limit);
+  const opts=[15,25,35,50].map(n=>'<option value="'+n+'"'+
+    (n===limit?' selected':'')+'>'+n+'</option>').join('');
+  let html='<div class="info-text">Showing '+((page-1)*limit+1)+' to '+
+    Math.min(page*limit,total)+' of '+total+'</div><div '+
+    'class="items-per-page"><label>Per page:</label><select onchange='+
+    '"state.limit=+this.value;state.page=1;load()">'+opts+
+    '</select></div><div class="pagination">';
+  if(page>1)html+='<button onclick="state.page='+(page-1)+
+    ';load()">Back</button>';
+  for(let i=Math.max(1,page-2);i<=Math.min(pages,page+2);i++)
+    html+='<button'+(i===page?' class="active"':'')+' onclick="state.page='+
+    i+';load()">'+i+'</button>';
+  if(page<pages)html+='<button onclick="state.page='+(page+1)+
+    ';load()">Next</button>';
+  html+='</div>';
+  document.getElementById('statsTop').innerHTML=html;
+  document.getElementById('statsBottom').innerHTML=html;
+}
+function exportCSV(){
+  let csv='Title,CPE 2.2 URI,CPE 2.3 URI,Dep 2.2,Dep 2.3,References\n';
+  document.querySelectorAll('#tbody tr').forEach(r=>{
+    csv+=[...r.cells].map(c=>c.innerText).map(
+      c=>'"'+c.replace(/"/g,'""')+'"').join(',')+'\n';});
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='cpe-export-'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function show(what){
+  ['loading','table','empty','error'].forEach(id=>
+    document.getElementById(id==='table'?'tableDiv':id)
+    .classList.toggle('hidden',id!==what));
+}
+    </script>
+</body>
+</html>
